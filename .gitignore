@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+.pytest_cache/
+.DS_Store
+.claude/settings.local.json
+handoff-agent-build-plan.md
