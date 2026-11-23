@@ -58,6 +58,14 @@
     .log div { padding: 6px 14px; border-bottom: 1px solid var(--line); }
     .log .t { color: var(--muted); margin-right: 6px; }
     #error { color: #b91c1c; }
+    #call-banner { position: fixed; top: 64px; right: 24px; width: 320px; background: #1c2430; color: #fff; border-radius: 14px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); z-index: 10; }
+    #call-banner .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #9aa4b2; }
+    #call-banner .title { font-size: 16px; font-weight: 600; margin: 2px 0 6px; }
+    #call-banner .row { display: flex; gap: 8px; margin-top: 10px; }
+    #call-banner button { flex: 1; border: 0; color: #fff; padding: 8px; font-weight: 600; }
+    #call-banner .answer { background: #16a34a; } #call-banner .decline, #call-banner .hangup { background: #dc2626; }
+    #call-banner .transcript { max-height: 160px; overflow-y: auto; font-size: 12px; color: #d4dae2; margin-top: 8px; }
+    #call-banner .transcript b { color: #fff; }
   </style>
 </head>
 <body>
@@ -70,6 +78,7 @@
     <button id="rerun-all">Re-run rules</button>
     <button id="reset">Reset demo</button>
   </header>
+  <div id="call-banner" hidden></div>
   <main>
     <section>
       <div class="metrics" id="metrics"></div>
@@ -191,6 +200,11 @@ function logLine(e) {
   else if (e.type === "rule_evaluated") detail = `${e.payload.action} (score ${e.payload.score})`;
   else if (e.type === "call_requested") detail = `${pretty(e.payload.trigger)}, attempt ${e.payload.attempt}, ${e.payload.mode} mode`;
   else if (e.type === "sms_sent") detail = e.payload.text;
+  else if (e.type === "call_status") detail = e.payload.status;
+  else if (e.type === "call_ended") detail = `${e.payload.outcome}, ${e.payload.ended_reason}${e.payload.duration_s != null ? `, ${e.payload.duration_s}s` : ""}`;
+  else if (e.type === "decision_written") detail = `${pretty(e.payload.decision.handoff_method)} (via ${e.payload.source})`;
+  else if (e.type === "fallback") detail = e.payload.reason;
+  else if (e.type === "call_failed") detail = e.payload.error;
   const div = document.createElement("div");
   div.innerHTML = `<span class="t">${esc(time)}</span><b>${esc(e.order_id || "demo")}</b> ${esc(pretty(e.type))} <span class="muted">${esc(detail)}</span>`;
   return div;
@@ -215,11 +229,109 @@ $("#rerun-all").addEventListener("click", async () => {
 });
 $("#reset").addEventListener("click", () => act("/api/reset"));
 
+// --- Web call mode: the customer's phone, simulated in the browser with the Vapi Web SDK ---
+let clientConfig = { call_mode: "web" };
+let vapiClient = null;
+let incoming = null;
+let activeCall = null;
+
+function renderCallBanner() {
+  const el = $("#call-banner");
+  const call = activeCall || incoming;
+  if (!call) { el.hidden = true; return; }
+  const order = orders.find((o) => o.id === call.order_id);
+  const who = order ? `${esc(order.customer_name)} · ${esc(call.order_id)}` : esc(call.order_id);
+  el.hidden = false;
+  if (activeCall) {
+    el.innerHTML = `<div class="label">Customer's phone · ${who}</div>
+      <div class="title">${activeCall.connected ? "On a call with Relay" : "Connecting…"}</div>
+      <div class="transcript" id="transcript"></div>
+      <div class="row"><button class="hangup" id="hangup">Hang up</button></div>`;
+    $("#transcript").replaceChildren(...activeCall.lines.map(([role, text]) => {
+      const p = document.createElement("div");
+      p.innerHTML = `<b>${role === "assistant" ? "Relay" : "Customer"}:</b> ${esc(text)}`;
+      return p;
+    }));
+    $("#hangup").onclick = () => vapiClient?.stop();
+    return;
+  }
+  el.innerHTML = `<div class="label">Customer's phone · ${who}</div>
+    <div class="title">📞 Incoming call from Relay</div>
+    <div class="muted">${esc(pretty(incoming.trigger))} · attempt ${esc(incoming.attempt)}</div>
+    <div class="row"><button class="answer" id="answer">Answer</button><button class="decline" id="decline">Decline</button></div>`;
+  $("#answer").onclick = answerCall;
+  $("#decline").onclick = async () => { const id = incoming.order_id; incoming = null; renderCallBanner(); await act(`/api/orders/${id}/decline-call`); };
+}
+
+function describeError(err) {
+  const msg = err?.error?.msg ?? err?.error?.message?.msg ?? err?.error?.message ?? err?.errorMsg ?? err?.message ?? err;
+  if (typeof msg === "string") return msg;
+  try { return JSON.stringify(msg); } catch { return String(msg); }
+}
+
+async function getVapi() {
+  if (vapiClient) return vapiClient;
+  const mod = await import("https://esm.sh/@vapi-ai/web");
+  const Vapi = mod.default?.default ?? mod.default;
+  vapiClient = new Vapi(clientConfig.public_key);
+  vapiClient.on("call-start", () => { if (activeCall) { activeCall.connected = true; renderCallBanner(); } });
+  vapiClient.on("call-end", () => { activeCall = null; renderCallBanner(); });
+  vapiClient.on("message", (m) => {
+    if (activeCall && m.type === "transcript" && m.transcriptType === "final") {
+      activeCall.lines.push([m.role, m.transcript]);
+      renderCallBanner();
+    }
+  });
+  vapiClient.on("error", (err) => {
+    const text = describeError(err);
+    // The SDK reports a normal hang-up as an "ejected / meeting has ended" error.
+    if (!activeCall || /eject|meeting has ended/i.test(text)) { console.debug("Vapi (call ended)", err); return; }
+    console.error("Vapi error", err);
+    $("#error").textContent = "Call error: " + text.slice(0, 160);
+  });
+  return vapiClient;
+}
+
+async function answerCall() {
+  if (!clientConfig.public_key || !clientConfig.assistant_id) {
+    $("#error").textContent = "Set VAPI_PUBLIC_KEY and VAPI_ASSISTANT_ID in .env, then restart the server.";
+    return;
+  }
+  const call = incoming;
+  incoming = null;
+  activeCall = { ...call, connected: false, lines: [] };
+  renderCallBanner();
+  try {
+    const client = await getVapi();
+    const started = await client.start(clientConfig.assistant_id, {
+      variableValues: call.variables,
+      metadata: { order_id: call.order_id, trigger: call.trigger },
+    });
+    if (started?.id) {
+      await fetch(`/api/orders/${call.order_id}/web-call-started`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ call_id: started.id, trigger: call.trigger, attempt: call.attempt }),
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    $("#error").textContent = "Couldn't start the call: " + err.message;
+    activeCall = null;
+    renderCallBanner();
+  }
+}
+
+api("/api/client-config").then((c) => { clientConfig = c; });
+
 let pending = null;
 const source = new EventSource("/api/stream");
 source.onmessage = (msg) => {
   const e = JSON.parse(msg.data);
-  if (e.type === "reset") $("#log").replaceChildren();
+  if (e.type === "reset") { $("#log").replaceChildren(); incoming = null; renderCallBanner(); }
+  if (e.type === "call_requested" && e.payload.mode === "web" && !activeCall) {
+    incoming = { order_id: e.order_id, ...e.payload };
+    renderCallBanner();
+  }
   $("#log").prepend(logLine(e));
   clearTimeout(pending);
   pending = setTimeout(refresh, 80);

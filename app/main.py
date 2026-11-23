@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
-from app import bus, config, db, orders, seed
+from app import bus, config, db, orders, seed, webhook
 
 
 @asynccontextmanager
@@ -18,6 +19,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Ring Ahead Agent", lifespan=lifespan)
+app.include_router(webhook.router)
 
 # Handlers are async (no awaits inside db sessions) so bus.publish runs on the event loop.
 
@@ -71,6 +73,36 @@ async def simulate_stall(order_id: str):
         if order["status"] not in ("picked_up", "arrived"):
             raise HTTPException(409, f"Order {order_id} is {order['status']}; pick it up first")
         return orders.simulate_stall(s, order)
+
+
+@app.get("/api/client-config")
+async def client_config():
+    # The public key is designed for browsers; never expose VAPI_API_KEY here.
+    return {"call_mode": config.CALL_MODE, "public_key": config.VAPI_PUBLIC_KEY,
+            "assistant_id": config.VAPI_ASSISTANT_ID}
+
+
+class WebCallStarted(BaseModel):
+    call_id: str
+    trigger: str
+    attempt: int
+
+
+@app.post("/api/orders/{order_id}/web-call-started")
+async def web_call_started(order_id: str, body: WebCallStarted):
+    with db.session() as s:
+        _require(s, order_id)
+        orders.record_call(s, body.call_id, order_id, body.trigger, body.attempt)
+        s.log_event(order_id, "call_started", {"call_id": body.call_id, "mode": "web"})
+    return {"ok": True}
+
+
+@app.post("/api/orders/{order_id}/decline-call")
+async def decline_call(order_id: str):
+    with db.session() as s:
+        order = _require(s, order_id)
+        orders.decline_call(s, order)
+    return {"ok": True}
 
 
 @app.post("/api/orders/{order_id}/rerun-rules")

@@ -8,6 +8,8 @@ load_dotenv(ROOT / ".env")
 
 VAPI_API_KEY = os.getenv("VAPI_API_KEY", "")
 VAPI_PUBLIC_KEY = os.getenv("VAPI_PUBLIC_KEY", "")
+VAPI_WEBHOOK_SECRET = os.getenv("VAPI_WEBHOOK_SECRET", "")
+VAPI_SERVER_CREDENTIAL_ID = os.getenv("VAPI_SERVER_CREDENTIAL_ID", "")
 VAPI_ASSISTANT_ID = os.getenv("VAPI_ASSISTANT_ID", "")
 VAPI_PHONE_NUMBER_ID = os.getenv("VAPI_PHONE_NUMBER_ID", "")
 CALL_MODE = os.getenv("CALL_MODE", "web")
