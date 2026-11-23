@@ -2,10 +2,231 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ring Ahead Agent</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --line: #e3e6ea; --text: #1c2430; --muted: #6b7684;
+      --call: #2563eb; --sms: #7c3aed; --none: #6b7684;
+      --ok: #15803d; --ok-bg: #e9f7ee; --warn: #a16207; --warn-bg: #fdf6e3; --info-bg: #eaf1fe;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--card); border-bottom: 1px solid var(--line); }
+    header h1 { font-size: 17px; margin: 0; }
+    header .sub { color: var(--muted); }
+    header .spacer { flex: 1; }
+    button { font: inherit; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+    button:hover { border-color: #b8c0ca; }
+    button.primary { background: var(--text); color: #fff; border-color: var(--text); }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding: 20px 24px; }
+    .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+    .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+    .metrics { display: flex; gap: 10px; margin-bottom: 16px; }
+    .metric { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+    .metric .v { font-size: 22px; font-weight: 600; }
+    .metric .k { color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 12px; color: var(--muted); font-weight: 500; }
+    tr.row { cursor: pointer; }
+    tr.row:hover { background: #fafbfc; }
+    tr.row.selected { background: #f1f5fd; }
+    .reasons { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
+    .reasons li.override { color: var(--text); font-weight: 500; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+    .badge.call { background: var(--call); } .badge.sms { background: var(--sms); } .badge.none { background: var(--none); }
+    .match { font-size: 12px; } .match.bad { color: #b91c1c; font-weight: 600; }
+    .hs { font-size: 12px; font-weight: 600; }
+    .hs.confirmed { color: var(--ok); } .hs.pending { color: var(--call); } .hs.unconfirmed { color: var(--warn); } .hs.not_needed { color: var(--muted); }
+    .actions { white-space: nowrap; } .actions button { padding: 3px 8px; font-size: 12px; }
+    .muted { color: var(--muted); }
+    .phone { width: 300px; margin: 16px auto; border: 10px solid #1c2430; border-radius: 36px; background: #fff; min-height: 480px; overflow: hidden; }
+    .phone .bar { background: #1c2430; color: #fff; padding: 8px 14px 12px; font-weight: 600; }
+    .phone .body { padding: 14px; }
+    .stop .addr { font-size: 18px; font-weight: 600; margin: 2px 0; }
+    .note { margin: 10px 0; padding: 8px 10px; background: var(--bg); border-radius: 8px; font-size: 13px; }
+    .handoff { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; }
+    .handoff .title { font-weight: 700; margin-bottom: 4px; }
+    .handoff.confirmed { background: var(--ok-bg); color: var(--ok); }
+    .handoff.pending { background: var(--info-bg); color: var(--call); }
+    .handoff.unconfirmed { background: var(--warn-bg); color: var(--warn); }
+    .handoff.idle { background: var(--bg); color: var(--muted); }
+    .handoff dl { margin: 6px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; color: var(--text); }
+    .handoff dt { color: var(--muted); }
+    .log { max-height: 320px; overflow-y: auto; font-size: 12px; }
+    .log div { padding: 6px 14px; border-bottom: 1px solid var(--line); }
+    .log .t { color: var(--muted); margin-right: 6px; }
+    #error { color: #b91c1c; }
+  </style>
 </head>
 <body>
-  <h1>Ring Ahead Agent</h1>
-  <p>Ops screen and courier screen arrive on Day 1.</p>
+  <header>
+    <h1>Ring Ahead Agent</h1>
+    <span class="sub">on Relay (demo platform)</span>
+    <span id="error"></span>
+    <span class="spacer"></span>
+    <button id="pickup-all" class="primary">Pick up all</button>
+    <button id="rerun-all">Re-run rules</button>
+    <button id="reset">Reset demo</button>
+  </header>
+  <main>
+    <section>
+      <div class="metrics" id="metrics"></div>
+      <div class="panel">
+        <h2>Orders</h2>
+        <table>
+          <thead><tr>
+            <th>Order</th><th>Drop-off</th><th>Status</th><th>Rule</th><th>Expected</th><th>Why</th><th>Handoff</th><th></th>
+          </tr></thead>
+          <tbody id="orders"></tbody>
+        </table>
+      </div>
+    </section>
+    <aside>
+      <div class="panel">
+        <h2>Courier screen</h2>
+        <div class="phone"><div class="bar">Relay Courier</div><div class="body" id="phone"></div></div>
+      </div>
+      <div class="panel" style="margin-top: 20px">
+        <h2>Event log</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </aside>
+  </main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pretty = (v) => String(v ?? "").replaceAll("_", " ");
+let orders = [];
+let selectedId = null;
+
+async function api(path, method = "GET") {
+  const res = await fetch(path, { method });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || res.statusText);
+  return body;
+}
+
+async function act(path, method = "POST") {
+  try { $("#error").textContent = ""; return await api(path, method); }
+  catch (e) { $("#error").textContent = e.message; }
+}
+
+async function refresh() {
+  orders = await api("/api/orders");
+  if (!selectedId && orders.length) selectedId = orders[0].id;
+  renderOrders();
+  renderPhone();
+  renderMetrics(await api("/api/metrics"));
+}
+
+function renderMetrics(m) {
+  const rate = m.call_worthy_rate == null ? "—" : Math.round(m.call_worthy_rate * 100) + "%";
+  const tiles = [
+    ["Picked up", m.picked_up], ["Call-worthy rate", rate],
+    ["Calls", m.actions.call], ["Texts", m.actions.sms], ["No contact", m.actions.none],
+    ["Confirmed", m.handoff.confirmed || 0],
+  ];
+  $("#metrics").innerHTML = tiles.map(([k, v]) => `<div class="metric"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("");
+}
+
+function renderOrders() {
+  $("#orders").innerHTML = orders.map((o) => {
+    const evaluated = Boolean(o.rule_action);
+    const match = !evaluated ? "" : o.rule_action === o.expected_action ? "✓" : "✗";
+    const reasons = o.rule_reasons.map((r) => `<li class="${r.startsWith("Override") ? "override" : ""}">${esc(r)}</li>`).join("");
+    const buttons = [];
+    if (o.status === "placed") buttons.push(`<button data-act="pickup" data-id="${esc(o.id)}">Pick up</button>`);
+    if (o.status === "picked_up") buttons.push(`<button data-act="arrive" data-id="${esc(o.id)}">Arrive</button>`);
+    if (["picked_up", "arrived"].includes(o.status) && o.handoff_status !== "confirmed")
+      buttons.push(`<button data-act="simulate-stall" data-id="${esc(o.id)}">Stall 120s</button>`);
+    return `<tr class="row ${o.id === selectedId ? "selected" : ""}" data-id="${esc(o.id)}">
+      <td><b>${esc(o.id)}</b><div class="muted">${esc(o.customer_name)}</div></td>
+      <td>${esc(o.address_line)}${o.unit ? ", " + esc(o.unit) : ""}<div class="muted">${esc(o.address_type)}${o.contains_alcohol ? " · alcohol" : ""}${o.call_opt_out ? " · no calls" : ""} · ETA ${esc(o.eta_minutes)}m</div></td>
+      <td>${esc(pretty(o.status))}</td>
+      <td>${evaluated ? `<span class="badge ${esc(o.rule_action)}">${esc(o.rule_action)}</span> <span class="muted">${esc(o.rule_score)}</span>` : "—"}</td>
+      <td>${esc(o.expected_action)} <span class="match ${match === "✗" ? "bad" : ""}">${match}</span></td>
+      <td>${reasons ? `<ul class="reasons">${reasons}</ul>` : ""}</td>
+      <td><span class="hs ${esc(o.handoff_status)}">${esc(pretty(o.handoff_status) || "—")}</span></td>
+      <td class="actions">${buttons.join(" ")}</td>
+    </tr>`;
+  }).join("");
+}
+
+function handoffCard(o) {
+  const d = o.handoff_decision;
+  if (o.handoff_status === "confirmed" && d) {
+    const rows = [["Building", d.building], ["Unit", d.unit], ["Code", d.entry_code], ["Method", pretty(d.handoff_method)], ["Note", d.instructions]]
+      .filter(([, v]) => v).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+    return `<div class="handoff confirmed"><div class="title">✓ Handoff confirmed</div><div>by ${esc(o.decision_source)}</div><dl>${rows}</dl></div>`;
+  }
+  if (o.handoff_status === "unconfirmed")
+    return `<div class="handoff unconfirmed"><div class="title">Unconfirmed: use the note</div><div>The customer didn't respond in time.</div></div>`;
+  if (o.handoff_status === "pending" && o.rule_action === "call")
+    return `<div class="handoff pending"><div class="title">Relay is calling the customer…</div><div>Keep driving. Details will appear here.</div></div>`;
+  if (o.handoff_status === "pending")
+    return `<div class="handoff pending"><div class="title">Text sent to customer</div><div>Waiting for their reply.</div></div>`;
+  if (o.handoff_status === "not_needed")
+    return `<div class="handoff idle"><div class="title">No call needed</div><div>Follow the drop-off note.</div></div>`;
+  return `<div class="handoff idle"><div class="title">Not picked up yet</div></div>`;
+}
+
+function renderPhone() {
+  const o = orders.find((x) => x.id === selectedId);
+  if (!o) { $("#phone").innerHTML = ""; return; }
+  $("#phone").innerHTML = `<div class="stop">
+      <div class="muted">${esc(o.id)} · ${esc(o.restaurant)} · ETA ${esc(o.eta_minutes)} min</div>
+      <div class="addr">${esc(o.address_line)}${o.unit ? ", " + esc(o.unit) : ""}</div>
+      <div>${esc(o.customer_name.split(" ")[0])} · ${esc(pretty(o.dropoff_pref))}</div>
+      <div class="note">${o.dropoff_note ? "“" + esc(o.dropoff_note) + "”" : '<span class="muted">No drop-off note</span>'}</div>
+    </div>${handoffCard(o)}`;
+}
+
+function logLine(e) {
+  const time = new Date(e.ts).toLocaleTimeString();
+  let detail = "";
+  if (e.type === "status_change") detail = `${pretty(e.payload.from)} → ${pretty(e.payload.to)}`;
+  else if (e.type === "rule_evaluated") detail = `${e.payload.action} (score ${e.payload.score})`;
+  else if (e.type === "call_requested") detail = `${pretty(e.payload.trigger)}, attempt ${e.payload.attempt}, ${e.payload.mode} mode`;
+  else if (e.type === "sms_sent") detail = e.payload.text;
+  const div = document.createElement("div");
+  div.innerHTML = `<span class="t">${esc(time)}</span><b>${esc(e.order_id || "demo")}</b> ${esc(pretty(e.type))} <span class="muted">${esc(detail)}</span>`;
+  return div;
+}
+
+async function loadLog() {
+  const events = await api("/api/events?limit=50");
+  $("#log").replaceChildren(...events.map(logLine));
+}
+
+$("#orders").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button");
+  const row = ev.target.closest("tr.row");
+  if (btn) { selectedId = btn.dataset.id; await act(`/api/orders/${btn.dataset.id}/${btn.dataset.act}`); }
+  else if (row) { selectedId = row.dataset.id; renderOrders(); renderPhone(); }
+});
+$("#pickup-all").addEventListener("click", async () => {
+  for (const o of orders.filter((x) => x.status === "placed")) await act(`/api/orders/${o.id}/pickup`);
+});
+$("#rerun-all").addEventListener("click", async () => {
+  for (const o of orders.filter((x) => x.rule_action)) await act(`/api/orders/${o.id}/rerun-rules`);
+});
+$("#reset").addEventListener("click", () => act("/api/reset"));
+
+let pending = null;
+const source = new EventSource("/api/stream");
+source.onmessage = (msg) => {
+  const e = JSON.parse(msg.data);
+  if (e.type === "reset") $("#log").replaceChildren();
+  $("#log").prepend(logLine(e));
+  clearTimeout(pending);
+  pending = setTimeout(refresh, 80);
+};
+
+refresh();
+loadLog();
+</script>
 </body>
 </html>

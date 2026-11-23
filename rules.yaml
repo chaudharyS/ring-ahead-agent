@@ -1,0 +1,29 @@
+# "Worth a call?" rules. Edit, save, then hit "Re-run rules" in the ops screen.
+
+weights:
+  multi_unit_no_unit: 3      # apartment or complex with no unit number
+  gated: 3
+  past_failed_handoff: 3
+  vague_note: 2              # also applies to an empty note at an apartment/complex
+  no_note: 1                 # empty note at any other address type
+  first_delivery: 1
+  hand_to_me: 1
+  contains_alcohol: 2
+  clear_house_dropoff: -4    # house + clear leave-at-door note + past successes + no past failures
+
+thresholds:
+  call: 3   # score >= 3
+  sms: 2    # score >= 2, else none
+
+overrides:
+  alcohol_forces_call: true
+
+vague_keywords:
+  - around back
+  - side door
+  - side entrance
+  - back door
+  - behind
+  - somewhere
+  - not sure
+  - "?"
