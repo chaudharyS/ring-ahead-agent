@@ -2,11 +2,13 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
+from typing import Literal
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app import bus, config, db, orders, seed, webhook
+from app import bus, config, db, metrics, orders, policy, seed, webhook
 
 
 @asynccontextmanager
@@ -44,7 +46,7 @@ async def health():
 @app.get("/api/orders")
 async def list_orders():
     with db.session() as s:
-        return orders.list_orders(s)
+        return [{**o, "retry_pending": policy.is_pending(o["id"])} for o in orders.list_orders(s)]
 
 
 @app.post("/api/orders/{order_id}/pickup")
@@ -62,7 +64,7 @@ async def arrive(order_id: str):
         order = _require(s, order_id)
         if order["status"] != "picked_up":
             raise HTTPException(409, f"Order {order_id} is {order['status']}, not picked up")
-        orders.arrive(s, order)
+        policy.on_arrive(s, order)
         return {"ok": True}
 
 
@@ -72,14 +74,38 @@ async def simulate_stall(order_id: str):
         order = _require(s, order_id)
         if order["status"] not in ("picked_up", "arrived"):
             raise HTTPException(409, f"Order {order_id} is {order['status']}; pick it up first")
-        return orders.simulate_stall(s, order)
+        return policy.on_stall(s, order)
+
+
+class TextReply(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+@app.post("/api/orders/{order_id}/sms-reply")
+async def sms_reply(order_id: str, body: TextReply):
+    with db.session() as s:
+        order = _require(s, order_id)
+        if order["status"] == "placed":
+            raise HTTPException(409, f"Order {order_id} hasn't been picked up yet")
+        policy.on_text_reply(s, order, body.text)
+    return {"ok": True}
 
 
 @app.get("/api/client-config")
 async def client_config():
     # The public key is designed for browsers; never expose VAPI_API_KEY here.
     return {"call_mode": config.CALL_MODE, "public_key": config.VAPI_PUBLIC_KEY,
-            "assistant_id": config.VAPI_ASSISTANT_ID}
+            "assistant_id": config.VAPI_ASSISTANT_ID, "time_speedup": config.TIME_SPEEDUP}
+
+
+class Settings(BaseModel):
+    time_speedup: float = Field(ge=1, le=100)
+
+
+@app.post("/api/settings")
+async def update_settings(body: Settings):
+    config.TIME_SPEEDUP = body.time_speedup
+    return {"time_speedup": config.TIME_SPEEDUP}
 
 
 class WebCallStarted(BaseModel):
@@ -97,11 +123,16 @@ async def web_call_started(order_id: str, body: WebCallStarted):
     return {"ok": True}
 
 
-@app.post("/api/orders/{order_id}/decline-call")
-async def decline_call(order_id: str):
+class NotAnswered(BaseModel):
+    result: Literal["declined", "no_answer", "busy", "voicemail"]
+
+
+@app.post("/api/orders/{order_id}/call-not-answered")
+async def call_not_answered(order_id: str, body: NotAnswered):
     with db.session() as s:
         order = _require(s, order_id)
-        orders.decline_call(s, order)
+        orders.call_not_answered(s, order, body.result)
+        policy.on_call_ended(s, order, body.result)
     return {"ok": True}
 
 
@@ -113,15 +144,16 @@ async def rerun_rules(order_id: str):
 
 @app.post("/api/reset")
 async def reset():
+    policy.cancel_all()
     with db.session() as s:
         seed.reset(s)
     return {"ok": True}
 
 
 @app.get("/api/metrics")
-async def metrics():
+async def get_metrics():
     with db.session() as s:
-        return orders.metrics(s)
+        return metrics.compute(s)
 
 
 @app.get("/api/events")

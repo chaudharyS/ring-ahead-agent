@@ -95,8 +95,8 @@ def test_resolved_call_sends_no_text(client):
 
 def test_decline_sends_text_once(client):
     client.post("/api/orders/R-1002/pickup")
-    client.post("/api/orders/R-1002/decline-call")
-    client.post("/api/orders/R-1002/decline-call")
+    client.post("/api/orders/R-1002/call-not-answered", json={"result": "declined"})
+    client.post("/api/orders/R-1002/call-not-answered", json={"result": "declined"})
     events = client.get("/api/events?limit=20").json()
     assert sum(e["type"] == "sms_sent" for e in events) == 1
 

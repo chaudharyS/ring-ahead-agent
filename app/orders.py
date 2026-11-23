@@ -1,5 +1,4 @@
 import json
-from collections import Counter
 
 import httpx
 
@@ -21,7 +20,8 @@ def _to_dict(row) -> dict:
 
 def list_orders(s: Session) -> list[dict]:
     rows = s.conn.execute("SELECT * FROM orders ORDER BY id").fetchall()
-    return [_to_dict(r) for r in rows]
+    texted = {r[0] for r in s.conn.execute("SELECT DISTINCT order_id FROM events WHERE type = 'sms_sent'")}
+    return [{**_to_dict(r), "sms_sent": r["id"] in texted} for r in rows]
 
 
 def get_order(s: Session, order_id: str) -> dict | None:
@@ -61,6 +61,15 @@ def _count_events(s: Session, order_id: str, type_: str) -> int:
 
 def call_attempts(s: Session, order_id: str) -> int:
     return _count_events(s, order_id, "call_requested")
+
+
+def pickup_calls(s: Session, order_id: str) -> int:
+    row = s.conn.execute(
+        """SELECT COUNT(*) FROM events WHERE order_id = ? AND type = 'call_requested'
+           AND json_extract(payload, '$.trigger') IN ('pickup', 'retry')""",
+        (order_id,),
+    ).fetchone()
+    return row[0]
 
 
 def record_call(s: Session, call_id: str, order_id: str, trigger: str, attempt: int) -> None:
@@ -136,19 +145,21 @@ def _outcome(ended_reason: str, confirmed: bool) -> str:
     )
 
 
-def call_ended(s: Session, call_id: str, order_id: str, ended_reason: str, duration_s: float | None) -> None:
-    order = get_order(s, order_id)
-    if not order:
-        return
+def call_ended(s: Session, call_id: str, order: dict, ended_reason: str, duration_s: float | None) -> str:
     outcome = _outcome(ended_reason, order["handoff_status"] == "confirmed")
     s.conn.execute(
         "UPDATE calls SET status = 'ended', ended_reason = ?, duration_s = ?, outcome = ?, ended_at = ? WHERE id = ?",
         (ended_reason, duration_s, outcome, now(), call_id),
     )
-    s.log_event(order_id, "call_ended",
+    s.log_event(order["id"], "call_ended",
                 {"call_id": call_id, "ended_reason": ended_reason, "duration_s": duration_s, "outcome": outcome})
-    if outcome != "resolved" and order["status"] != "arrived":
-        fallback_to_text(s, order, reason=f"Call ended without a decision ({ended_reason})")
+    return outcome
+
+
+def call_not_answered(s: Session, order: dict, outcome: str) -> None:
+    # Web mode stand-in for a phone call that wasn't picked up (declined, rang out, busy, voicemail).
+    s.log_event(order["id"], "call_ended", {"ended_reason": f"simulated-{outcome}", "outcome": outcome,
+                                            "simulated": True})
 
 
 def fallback_to_text(s: Session, order: dict, reason: str) -> None:
@@ -157,9 +168,15 @@ def fallback_to_text(s: Session, order: dict, reason: str) -> None:
         send_sms(s, order)
 
 
-def decline_call(s: Session, order: dict) -> None:
-    s.log_event(order["id"], "call_declined", {})
-    fallback_to_text(s, order, reason="Customer declined the call")
+def write_text_decision(s: Session, order: dict, text: str) -> None:
+    s.log_event(order["id"], "sms_reply", {"text": text})
+    method = {"hand_to_me": "hand_to_customer", "meet_outside": "meet_outside"}.get(order["dropoff_pref"],
+                                                                                   "leave_at_door")
+    if order["contains_alcohol"]:
+        method = "hand_to_customer"
+    decision = {"handoff_method": method, "instructions": text.strip()[:120], "customer_confirmed": True}
+    _set(s, order["id"], handoff_status="confirmed", decision_source="sms", handoff_decision=json.dumps(decision))
+    s.log_event(order["id"], "decision_written", {"source": "sms", "decision": decision})
 
 
 def pickup(s: Session, order: dict) -> dict:
@@ -188,7 +205,7 @@ def arrive(s: Session, order: dict) -> None:
 
 def simulate_stall(s: Session, order: dict) -> dict:
     if order["status"] != "arrived":
-        _set_status(s, order, "arrived")
+        arrive(s, order)
     if order["handoff_status"] == "confirmed":
         return {"called": False, "reason": "Handoff already confirmed"}
     if call_attempts(s, order["id"]) >= MAX_CALLS_PER_ORDER:
@@ -203,13 +220,3 @@ def recent_events(s: Session, limit: int) -> list[dict]:
     return [{**dict(r), "payload": json.loads(r["payload"] or "{}")} for r in rows]
 
 
-def metrics(s: Session) -> dict:
-    rows = s.conn.execute("SELECT rule_action, handoff_status FROM orders WHERE status != 'placed'").fetchall()
-    n = len(rows)
-    actions = Counter(r["rule_action"] for r in rows)
-    return {
-        "picked_up": n,
-        "call_worthy_rate": round(actions["call"] / n, 2) if n else None,
-        "actions": {a: actions[a] for a in ("call", "sms", "none")},
-        "handoff": dict(Counter(r["handoff_status"] for r in rows)),
-    }

@@ -15,8 +15,10 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # then fill in your Vapi keys
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8000 --timeout-graceful-shutdown 2
 ```
+
+The shutdown timeout keeps `--reload` from hanging on the page's open live-update connection.
 
 In another terminal, expose the server so Vapi can reach the webhook:
 

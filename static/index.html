@@ -25,7 +25,11 @@
     .metrics { display: flex; gap: 10px; margin-bottom: 16px; }
     .metric { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
     .metric .v { font-size: 22px; font-weight: 600; }
-    .metric .k { color: var(--muted); font-size: 12px; }
+    .metric .k { color: var(--text); font-size: 12px; font-weight: 500; }
+    .metric .sub { color: var(--muted); font-size: 11px; }
+    #call-banner .simulate { margin-top: 8px; font-size: 12px; color: #9aa4b2; }
+    #call-banner .simulate a { color: #d4dae2; }
+    select { font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: var(--card); }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { font-size: 12px; color: var(--muted); font-weight: 500; }
@@ -74,6 +78,9 @@
     <span class="sub">on Relay (demo platform)</span>
     <span id="error"></span>
     <span class="spacer"></span>
+    <label class="muted">Demo speed
+      <select id="speed"><option value="1">1×</option><option value="10">10×</option><option value="30">30×</option></select>
+    </label>
     <button id="pickup-all" class="primary">Pick up all</button>
     <button id="rerun-all">Re-run rules</button>
     <button id="reset">Reset demo</button>
@@ -82,6 +89,7 @@
   <main>
     <section>
       <div class="metrics" id="metrics"></div>
+      <div class="muted" id="resolved-by" style="margin: -6px 0 14px"></div>
       <div class="panel">
         <h2>Orders</h2>
         <table>
@@ -111,15 +119,17 @@ const pretty = (v) => String(v ?? "").replaceAll("_", " ");
 let orders = [];
 let selectedId = null;
 
-async function api(path, method = "GET") {
-  const res = await fetch(path, { method });
+async function api(path, method = "GET", payload) {
+  const opts = { method };
+  if (payload !== undefined) { opts.headers = { "Content-Type": "application/json" }; opts.body = JSON.stringify(payload); }
+  const res = await fetch(path, opts);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.detail || res.statusText);
+  if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : res.statusText);
   return body;
 }
 
-async function act(path, method = "POST") {
-  try { $("#error").textContent = ""; return await api(path, method); }
+async function act(path, payload) {
+  try { $("#error").textContent = ""; return await api(path, "POST", payload); }
   catch (e) { $("#error").textContent = e.message; }
 }
 
@@ -132,13 +142,19 @@ async function refresh() {
 }
 
 function renderMetrics(m) {
-  const rate = m.call_worthy_rate == null ? "—" : Math.round(m.call_worthy_rate * 100) + "%";
+  const pct = (v) => (v == null ? "—" : Math.round(v * 100) + "%");
   const tiles = [
-    ["Picked up", m.picked_up], ["Call-worthy rate", rate],
-    ["Calls", m.actions.call], ["Texts", m.actions.sms], ["No contact", m.actions.none],
-    ["Confirmed", m.handoff.confirmed || 0],
+    ["Picked up", m.picked_up, `${m.actions.call} call · ${m.actions.sms} text · ${m.actions.none} none`],
+    ["Call-worthy rate", pct(m.call_worthy_rate), "picked-up orders the rules called"],
+    ["Resolution rate", pct(m.resolution_rate), "called orders confirmed"],
+    ["Before arrival", pct(m.resolved_before_arrival), "confirmed before courier arrived"],
+    ["Median call", m.median_call_s == null ? "—" : m.median_call_s + "s", `target < 45s · ${m.calls_measured} calls`],
+    ["Fallback rate", pct(m.fallback_rate), "calls ending in text or unconfirmed"],
   ];
-  $("#metrics").innerHTML = tiles.map(([k, v]) => `<div class="metric"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join("");
+  const by = Object.entries(m.resolved_by).map(([k, v]) => `${esc(k)}: <b>${esc(v)}</b>`).join(" · ");
+  $("#metrics").innerHTML = tiles.map(([k, v, sub]) =>
+    `<div class="metric"><div class="v">${esc(v)}</div><div class="k">${esc(k)}</div><div class="sub">${esc(sub)}</div></div>`).join("");
+  $("#resolved-by").innerHTML = by ? `Resolved by: ${by}` : "";
 }
 
 function renderOrders() {
@@ -151,6 +167,8 @@ function renderOrders() {
     if (o.status === "picked_up") buttons.push(`<button data-act="arrive" data-id="${esc(o.id)}">Arrive</button>`);
     if (["picked_up", "arrived"].includes(o.status) && o.handoff_status !== "confirmed")
       buttons.push(`<button data-act="simulate-stall" data-id="${esc(o.id)}">Stall 120s</button>`);
+    if (o.sms_sent && ["pending", "unconfirmed"].includes(o.handoff_status))
+      buttons.push(`<button data-act="sms-reply" data-id="${esc(o.id)}">Text reply</button>`);
     return `<tr class="row ${o.id === selectedId ? "selected" : ""}" data-id="${esc(o.id)}">
       <td><b>${esc(o.id)}</b><div class="muted">${esc(o.customer_name)}</div></td>
       <td>${esc(o.address_line)}${o.unit ? ", " + esc(o.unit) : ""}<div class="muted">${esc(o.address_type)}${o.contains_alcohol ? " · alcohol" : ""}${o.call_opt_out ? " · no calls" : ""} · ETA ${esc(o.eta_minutes)}m</div></td>
@@ -173,10 +191,12 @@ function handoffCard(o) {
   }
   if (o.handoff_status === "unconfirmed")
     return `<div class="handoff unconfirmed"><div class="title">Unconfirmed: use the note</div><div>The customer didn't respond in time.</div></div>`;
-  if (o.handoff_status === "pending" && o.rule_action === "call")
+  if (o.handoff_status === "pending" && o.retry_pending)
+    return `<div class="handoff pending"><div class="title">No answer yet</div><div>Text sent. Relay will call again shortly. Keep driving.</div></div>`;
+  if (o.handoff_status === "pending" && o.rule_action === "call" && !o.sms_sent)
     return `<div class="handoff pending"><div class="title">Relay is calling the customer…</div><div>Keep driving. Details will appear here.</div></div>`;
   if (o.handoff_status === "pending")
-    return `<div class="handoff pending"><div class="title">Text sent to customer</div><div>Waiting for their reply.</div></div>`;
+    return `<div class="handoff pending"><div class="title">Text sent to customer</div><div>Waiting for their reply. Keep driving.</div></div>`;
   if (o.handoff_status === "not_needed")
     return `<div class="handoff idle"><div class="title">No call needed</div><div>Follow the drop-off note.</div></div>`;
   return `<div class="handoff idle"><div class="title">Not picked up yet</div></div>`;
@@ -201,7 +221,11 @@ function logLine(e) {
   else if (e.type === "call_requested") detail = `${pretty(e.payload.trigger)}, attempt ${e.payload.attempt}, ${e.payload.mode} mode`;
   else if (e.type === "sms_sent") detail = e.payload.text;
   else if (e.type === "call_status") detail = e.payload.status;
-  else if (e.type === "call_ended") detail = `${e.payload.outcome}, ${e.payload.ended_reason}${e.payload.duration_s != null ? `, ${e.payload.duration_s}s` : ""}`;
+  else if (e.type === "call_ended") detail = e.payload.simulated ? `${pretty(e.payload.outcome)} (simulated)`
+    : `${pretty(e.payload.outcome)}, ${e.payload.ended_reason}${e.payload.duration_s != null ? `, ${e.payload.duration_s}s` : ""}`;
+  else if (e.type === "retry_scheduled") detail = `calling again in ${e.payload.in_seconds}s (${pretty(e.payload.after)})${e.payload.time_speedup > 1 ? `, ${e.payload.time_speedup}× speed` : ""}`;
+  else if (e.type === "retry_cancelled") detail = e.payload.reason;
+  else if (e.type === "sms_reply") detail = `“${e.payload.text}”`;
   else if (e.type === "decision_written") detail = `${pretty(e.payload.decision.handoff_method)} (via ${e.payload.source})`;
   else if (e.type === "fallback") detail = e.payload.reason;
   else if (e.type === "call_failed") detail = e.payload.error;
@@ -218,7 +242,12 @@ async function loadLog() {
 $("#orders").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button");
   const row = ev.target.closest("tr.row");
-  if (btn) { selectedId = btn.dataset.id; await act(`/api/orders/${btn.dataset.id}/${btn.dataset.act}`); }
+  if (btn?.dataset.act === "sms-reply") {
+    selectedId = btn.dataset.id;
+    const text = prompt(`Customer's text reply for ${btn.dataset.id}:`, "Building C, unit 204, leave it at the door");
+    if (text?.trim()) await act(`/api/orders/${btn.dataset.id}/sms-reply`, { text: text.trim() });
+  }
+  else if (btn) { selectedId = btn.dataset.id; await act(`/api/orders/${btn.dataset.id}/${btn.dataset.act}`); }
   else if (row) { selectedId = row.dataset.id; renderOrders(); renderPhone(); }
 });
 $("#pickup-all").addEventListener("click", async () => {
@@ -258,9 +287,18 @@ function renderCallBanner() {
   el.innerHTML = `<div class="label">Customer's phone · ${who}</div>
     <div class="title">📞 Incoming call from Relay</div>
     <div class="muted">${esc(pretty(incoming.trigger))} · attempt ${esc(incoming.attempt)}</div>
-    <div class="row"><button class="answer" id="answer">Answer</button><button class="decline" id="decline">Decline</button></div>`;
+    <div class="row"><button class="answer" id="answer">Answer</button><button class="decline" data-result="declined">Decline</button></div>
+    <div class="simulate">Simulate: <a href="#" data-result="no_answer">no answer</a> · <a href="#" data-result="busy">busy</a> · <a href="#" data-result="voicemail">voicemail</a></div>`;
   $("#answer").onclick = answerCall;
-  $("#decline").onclick = async () => { const id = incoming.order_id; incoming = null; renderCallBanner(); await act(`/api/orders/${id}/decline-call`); };
+  el.querySelectorAll("[data-result]").forEach((b) => {
+    b.onclick = async (ev) => {
+      ev.preventDefault();
+      const id = incoming.order_id;
+      incoming = null;
+      renderCallBanner();
+      await act(`/api/orders/${id}/call-not-answered`, { result: b.dataset.result });
+    };
+  });
 }
 
 function describeError(err) {
@@ -321,7 +359,8 @@ async function answerCall() {
   }
 }
 
-api("/api/client-config").then((c) => { clientConfig = c; });
+api("/api/client-config").then((c) => { clientConfig = c; $("#speed").value = String(c.time_speedup); });
+$("#speed").addEventListener("change", (ev) => act("/api/settings", { time_speedup: Number(ev.target.value) }));
 
 let pending = null;
 const source = new EventSource("/api/stream");

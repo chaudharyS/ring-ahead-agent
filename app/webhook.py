@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app import config, db, orders
+from app import config, db, orders, policy
 
 router = APIRouter()
 
@@ -77,10 +77,12 @@ async def vapi_webhook(request: Request):
     elif kind == "end-of-call-report" and call_id:
         with db.session() as s:
             order_id = _order_id_for_call(s, call_id, msg)
-            if order_id:
+            order = orders.get_order(s, order_id) if order_id else None
+            if order:
                 ctx = _call_context(msg)
                 orders.record_call(s, call_id, order_id, ctx.get("trigger", "pickup"),
                                    max(orders.call_attempts(s, order_id), 1))
-                orders.call_ended(s, call_id, order_id, msg.get("endedReason", ""), _duration(msg))
+                outcome = orders.call_ended(s, call_id, order, msg.get("endedReason", ""), _duration(msg))
+                policy.on_call_ended(s, order, outcome)
 
     return {}
