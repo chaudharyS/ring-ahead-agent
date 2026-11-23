@@ -120,6 +120,16 @@ def test_three_call_cap_includes_stall(client):
     assert len(_events(client, "call_requested")) == 3
 
 
+def test_order_timeline_events(client):
+    client.post("/api/orders/R-1002/pickup")
+    _not_answered(client, "declined")
+    client.post("/api/orders/R-1002/sms-reply", json={"text": "Unit 204"})
+    types = [e["type"] for e in client.get("/api/orders/R-1002/events").json()]
+    assert types[:3] == ["status_change", "rule_evaluated", "call_requested"]
+    assert types[-1] == "decision_written"
+    assert client.get("/api/orders/R-9999/events").status_code == 404
+
+
 def test_metrics(client):
     for order_id in ("R-1002", "R-1003", "R-1004", "R-1005", "R-1001"):
         client.post(f"/api/orders/{order_id}/pickup")

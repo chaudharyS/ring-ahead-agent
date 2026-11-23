@@ -49,6 +49,13 @@ async def list_orders():
         return [{**o, "retry_pending": policy.is_pending(o["id"])} for o in orders.list_orders(s)]
 
 
+@app.get("/api/orders/{order_id}/events")
+async def order_events(order_id: str):
+    with db.session() as s:
+        _require(s, order_id)
+        return orders.order_events(s, order_id)
+
+
 @app.post("/api/orders/{order_id}/pickup")
 async def pickup(order_id: str):
     with db.session() as s:

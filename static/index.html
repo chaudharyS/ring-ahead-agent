@@ -62,6 +62,16 @@
     .log div { padding: 6px 14px; border-bottom: 1px solid var(--line); }
     .log .t { color: var(--muted); margin-right: 6px; }
     #error { color: #b91c1c; }
+    .timeline { list-style: none; margin: 0; padding: 12px 14px 4px 30px; font-size: 13px; }
+    .timeline li { position: relative; padding: 0 0 12px 0; }
+    .timeline li::before { content: ""; position: absolute; left: -17px; top: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+    .timeline li::after { content: ""; position: absolute; left: -13px; top: 16px; bottom: 0; width: 1px; background: var(--line); }
+    .timeline li:last-child::after { display: none; }
+    .timeline li.ok::before { background: var(--ok); } .timeline li.warn::before { background: #d97706; }
+    .timeline li.call::before { background: var(--call); } .timeline li.sms::before { background: var(--sms); }
+    .timeline .when { color: var(--muted); font-size: 11px; margin-left: 6px; }
+    .timeline .detail { color: var(--muted); font-size: 12px; }
+    .timeline .empty { color: var(--muted); padding-bottom: 8px; }
     #call-banner { position: fixed; top: 64px; right: 24px; width: 320px; background: #1c2430; color: #fff; border-radius: 14px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); z-index: 10; }
     #call-banner .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #9aa4b2; }
     #call-banner .title { font-size: 16px; font-weight: 600; margin: 2px 0 6px; }
@@ -106,6 +116,10 @@
         <div class="phone"><div class="bar">Relay Courier</div><div class="body" id="phone"></div></div>
       </div>
       <div class="panel" style="margin-top: 20px">
+        <h2 id="timeline-title">Timeline</h2>
+        <ol class="timeline" id="timeline"></ol>
+      </div>
+      <div class="panel" style="margin-top: 20px">
         <h2>Event log</h2>
         <div class="log" id="log"></div>
       </div>
@@ -138,7 +152,46 @@ async function refresh() {
   if (!selectedId && orders.length) selectedId = orders[0].id;
   renderOrders();
   renderPhone();
+  renderTimeline();
   renderMetrics(await api("/api/metrics"));
+}
+
+function timelineStep(e) {
+  const p = e.payload;
+  switch (e.type) {
+    case "status_change":
+      return p.to === "picked_up" ? ["Picked up", "", ""] : p.to === "arrived" ? ["Courier arrived", "", ""] : null;
+    case "rule_evaluated": return [`Rules said ${p.action}`, `score ${p.score}`, p.action === "call" ? "call" : p.action === "sms" ? "sms" : ""];
+    case "call_requested": return [`Calling customer${p.trigger === "retry" ? " again" : p.trigger === "arrival_stall" ? " from the door" : ""}`, `attempt ${p.attempt}`, "call"];
+    case "call_started": return ["Customer answered", "", "call"];
+    case "call_ended": return [`Call ended: ${pretty(p.outcome)}`, p.duration_s != null ? `${p.duration_s}s` : (p.simulated ? "simulated" : ""), p.outcome === "resolved" ? "ok" : "warn"];
+    case "sms_sent": return ["Text sent to customer", "", "sms"];
+    case "sms_reply": return ["Customer replied by text", `“${p.text}”`, "sms"];
+    case "retry_scheduled": return [`Retry scheduled`, `in ${p.in_seconds}s`, "warn"];
+    case "retry_cancelled": return ["Retry cancelled", p.reason, ""];
+    case "arrival_stall": return ["Courier stuck at the door", "120 s, no confirmed handoff", "warn"];
+    case "decision_written": return [`Handoff confirmed by ${p.source === "sms" ? "text" : "call"}`, pretty(p.decision.handoff_method), "ok"];
+    case "fallback": return p.reason.startsWith("Courier arrived") ? ["Unconfirmed: courier uses the note", "", "warn"] : null;
+    default: return null;
+  }
+}
+
+function elapsed(from, to) {
+  const s = Math.round((new Date(to) - new Date(from)) / 1000);
+  return s < 60 ? `+${s}s` : `+${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+async function renderTimeline() {
+  const id = selectedId;
+  $("#timeline-title").textContent = id ? `Timeline · ${id}` : "Timeline";
+  if (!id) return;
+  const events = await api(`/api/orders/${id}/events`);
+  if (id !== selectedId) return;
+  const steps = events.map((e) => [e, timelineStep(e)]).filter(([, s]) => s);
+  if (!steps.length) { $("#timeline").innerHTML = `<li class="empty">Not picked up yet.</li>`; return; }
+  const start = steps[0][0].ts;
+  $("#timeline").innerHTML = steps.map(([e, [label, detail, cls]]) =>
+    `<li class="${esc(cls)}"><b>${esc(label)}</b><span class="when">${esc(elapsed(start, e.ts))}</span>${detail ? `<div class="detail">${esc(detail)}</div>` : ""}</li>`).join("");
 }
 
 function renderMetrics(m) {
@@ -248,7 +301,7 @@ $("#orders").addEventListener("click", async (ev) => {
     if (text?.trim()) await act(`/api/orders/${btn.dataset.id}/sms-reply`, { text: text.trim() });
   }
   else if (btn) { selectedId = btn.dataset.id; await act(`/api/orders/${btn.dataset.id}/${btn.dataset.act}`); }
-  else if (row) { selectedId = row.dataset.id; renderOrders(); renderPhone(); }
+  else if (row) { selectedId = row.dataset.id; renderOrders(); renderPhone(); renderTimeline(); }
 });
 $("#pickup-all").addEventListener("click", async () => {
   for (const o of orders.filter((x) => x.status === "placed")) await act(`/api/orders/${o.id}/pickup`);

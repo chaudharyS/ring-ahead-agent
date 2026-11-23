@@ -215,6 +215,11 @@ def simulate_stall(s: Session, order: dict) -> dict:
     return {"called": True, "reason": "Stopped at the address for 120 s with no confirmed handoff"}
 
 
+def order_events(s: Session, order_id: str) -> list[dict]:
+    rows = s.conn.execute("SELECT * FROM events WHERE order_id = ? ORDER BY id", (order_id,)).fetchall()
+    return [{**dict(r), "payload": json.loads(r["payload"] or "{}")} for r in rows]
+
+
 def recent_events(s: Session, limit: int) -> list[dict]:
     rows = s.conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [{**dict(r), "payload": json.loads(r["payload"] or "{}")} for r in rows]
