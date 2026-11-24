@@ -1,24 +1,24 @@
 # Ring Ahead Agent
 
-A voice agent built on [Vapi](https://vapi.ai) that sorts out delivery drop-off details with the customer **while the courier is still driving**, so the courier never has to text at the wheel or wait at the door.
+A voice agent built on [Vapi](https://vapi.ai) that sorts out delivery drop-off details with the customer **while the delivery partner is still driving**, so the delivery partner never has to text at the wheel or wait at the door.
 
 The demo runs on "Relay", a fictional delivery platform. All data is made up.
 
 ## The problem
 
-Drop-off questions (which building, what's the gate code, leave it or hand it over) surface when the courier arrives, at the worst possible moment. The courier is driving or standing at the door, texting a customer who isn't looking at their phone.
+Drop-off questions (which building, what's the gate code, leave it or hand it over) surface when the delivery partner arrives, at the worst possible moment. The delivery partner is driving or standing at the door, texting a customer who isn't looking at their phone.
 
-> The handoff question is asked at the wrong time (arrival), by the wrong person (a driving courier), through the wrong channel (a text nobody sees).
+> The handoff question is asked at the wrong time (arrival), by the wrong person (a driving delivery partner), through the wrong channel (a text nobody sees).
 
 ## How it works
 
-1. The courier marks an order **picked up**.
+1. The delivery partner marks an order **picked up**.
 2. Explainable **"worth a call?" rules** decide: `call`, `sms`, or `none`, and list every reason.
 3. On `call`, the Vapi agent phones the customer right away and asks only what it needs.
 4. It reads the details back in one sentence, then **saves them through a tool call while the call is still live**.
-5. The courier's screen flips to **Handoff confirmed** before they arrive. Hands stay on the wheel.
+5. The delivery partner's screen flips to **Handoff confirmed** before they arrive. Hands stay on the wheel.
 
-If the customer doesn't pick up, the next step depends on *why*, and the courier always ends up with something to act on.
+If the customer doesn't pick up, the next step depends on *why*, and the delivery partner always ends up with something to act on.
 
 ## The rules: not every order needs a call
 
@@ -56,14 +56,14 @@ Defined in code ([`app/assistant_config.py`](app/assistant_config.py)) and synce
 | Declined / voicemail / hung up undecided | Text only |
 | Confirmed | Stop everything |
 
-- Max 2 calls at pickup and 3 per order, including one last call if the courier is stuck at the door for 120 s.
-- A text reply cancels the pending retry. So does the courier tapping **Arrive**, which marks the handoff "unconfirmed" so the courier uses the existing note.
+- Max 2 calls at pickup and 3 per order, including one last call if the delivery partner is stuck at the door for 120 s.
+- A text reply cancels the pending retry. So does the delivery partner tapping **Arrive**, which marks the handoff "unconfirmed" so the delivery partner uses the existing note.
 - Both retry gaps are under 3 minutes on purpose: with **Allow Repeated Calls** on, an iPhone lets a second call from the same number through Do Not Disturb if it comes within 3 minutes ([Apple Support](https://support.apple.com/guide/iphone/set-do-not-disturb-iph5c3f5b77b/ios)).
 
 ## Testing
 
 - **48 backend tests** (`pytest`): every rule branch, the webhook, validation, and each retry/fallback path with its timing, call limits and cancellation.
-- **Vapi Simulations** ([`scripts/simulations.py`](scripts/simulations.py)): an AI tester plays the customer across 10 scenarios (cooperative, impatient, not home, self-correction, address-change request, alcohol, suspicious caller, talks over the agent, courier already outside, voicemail). The agent's tool calls hit the real webhook, and results are cross-checked against the database.
+- **Vapi Simulations** ([`scripts/simulations.py`](scripts/simulations.py)): an AI tester plays the customer across 10 scenarios (cooperative, impatient, not home, self-correction, address-change request, alcohol, suspicious caller, talks over the agent, delivery partner already outside, voicemail). The agent's tool calls hit the real webhook, and results are cross-checked against the database.
   - Chat mode: **27/27** (9 scenarios × 3 runs).
   - Voice mode: **3/4**, median response time 972–1,261 ms. The failure is real and instructive: Vapi's voicemail detection didn't trigger in simulation, and the prompt had no fallback, so the agent questioned a voicemail box for 60 s.
 
@@ -71,7 +71,7 @@ Defined in code ([`app/assistant_config.py`](app/assistant_config.py)) and synce
 
 ```
 ┌──────────────────────┐        ┌──────────────────────┐
-│  Ops + courier UI    │◀──SSE──│  FastAPI + SQLite    │
+│  Ops + delivery UI   │◀──SSE──│  FastAPI + SQLite    │
 │  (one HTML page)     │──REST─▶│  rules · retries ·   │
 └──────────┬───────────┘        │  metrics · webhook   │
            │ Vapi Web SDK       └──────────▲───────────┘
@@ -87,7 +87,7 @@ Python 3.12, FastAPI, SQLite, vanilla JS, no build step.
 ```
 app/        backend: rules, orders, retry policy, metrics, Vapi webhook
 scripts/    sync_assistant.py (create/update the agent), simulations.py (test suite)
-static/     the single-page ops + courier UI
+static/     the single-page ops + delivery UI
 tests/      pytest suite
 rules.yaml  the "worth a call?" weights
 ```

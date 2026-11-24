@@ -24,22 +24,22 @@ def known_issue(reasons: list[str]) -> str:
 def first_question(order: dict) -> str:
     reasons = " ".join(order["rule_reasons"]).lower()
     if order["contains_alcohol"]:
-        return ("Since your order includes alcohol, the courier has to hand it to an adult with ID. "
+        return ("Since your order includes alcohol, the delivery partner has to hand it to an adult with ID. "
                 "Will you be able to meet them?")
     if "no unit number" in reasons:
         return "What's your building and unit number?"
     if order["address_type"] == "gated":
-        return "Is there a gate code the courier will need?"
+        return "Is there a gate code the delivery partner will need?"
     if "vague drop-off note" in reasons:
-        return "Where exactly should the courier drop it off?"
+        return "Where exactly should the delivery partner drop it off?"
     if "past failed handoff" in reasons:
-        return "Where exactly should the courier leave it so it doesn't get missed?"
-    return "How would you like the courier to hand it off?"
+        return "Where exactly should the delivery partner leave it so it doesn't get missed?"
+    return "How would you like the delivery partner to hand it off?"
 
 
 def status_line(order: dict, trigger: str) -> str:
     if trigger == "arrival_stall":
-        return f"Your courier is outside with your {order['restaurant']} order now."
+        return f"Your delivery partner is outside with your {order['restaurant']} order now."
     return f"Your {order['restaurant']} order is about {order['eta_minutes']} minutes away."
 
 

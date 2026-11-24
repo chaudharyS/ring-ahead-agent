@@ -200,7 +200,7 @@ def arrive(s: Session, order: dict) -> None:
     if order["handoff_status"] == "pending":
         _set(s, order["id"], handoff_status="unconfirmed", decision_source="existing_note")
         order["handoff_status"] = "unconfirmed"
-        s.log_event(order["id"], "fallback", {"reason": "Courier arrived with no confirmed handoff; use the note"})
+        s.log_event(order["id"], "fallback", {"reason": "Delivery partner arrived with no confirmed handoff; use the note"})
 
 
 def simulate_stall(s: Session, order: dict) -> dict:

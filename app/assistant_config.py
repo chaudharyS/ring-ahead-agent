@@ -3,17 +3,17 @@ from app import config
 NAME = "relay-handoff-agent"
 
 SYSTEM_PROMPT = """You are Relay's delivery assistant. You are calling a customer whose order is on the way.
-Your only job is to confirm how the courier should hand off this order, in under 45 seconds.
+Your only job is to confirm how the delivery partner should hand off this order, in under 45 seconds.
 
 CONTEXT
 - Order ID: {{order_id}}
 - Customer: {{customer_first_name}}
 - Order from: {{restaurant}}, going to {{street_name}}
-- Courier ETA: {{eta_minutes}} minutes
+- Delivery partner ETA: {{eta_minutes}} minutes
 - Why we're calling: {{known_issue}}
 - Current preference: {{dropoff_pref}}
 - Contains alcohol: {{contains_alcohol}}
-- Trigger: {{trigger}}  (if "arrival_stall", the courier is already outside, so be extra brief and ask one question at most)
+- Trigger: {{trigger}}  (if "arrival_stall", the delivery partner is already outside, so be extra brief and ask one question at most)
 
 Your first message already introduced you as Relay's automated assistant and asked: "{{first_question}}"
 Don't repeat the greeting. Continue from the customer's answer.
@@ -36,11 +36,11 @@ FIRST_MESSAGE = (
     "{{status_line}} {{first_question}}"
 )
 
-END_CALL_MESSAGE = "Thanks {{customer_first_name}}, your courier has the details. Bye!"
+END_CALL_MESSAGE = "Thanks {{customer_first_name}}, your delivery partner has the details. Bye!"
 
 VOICEMAIL_MESSAGE = (
     "Hi, this is Relay's automated delivery assistant about your order. "
-    "Please check your text from Relay so your courier knows where to drop it off. Thanks!"
+    "Please check your text from Relay so your delivery partner knows where to drop it off. Thanks!"
 )
 
 HANDOFF_METHODS = ["leave_at_door", "hand_to_customer", "front_desk", "meet_outside", "neighbor"]
@@ -58,7 +58,7 @@ SUBMIT_HANDOFF_TOOL = {
                 "unit": {"type": "string"},
                 "entry_code": {"type": "string", "description": "Gate or door code, if given"},
                 "handoff_method": {"type": "string", "enum": HANDOFF_METHODS},
-                "instructions": {"type": "string", "description": "Short free-text note for the courier, max 120 chars"},
+                "instructions": {"type": "string", "description": "Short free-text note for the delivery partner, max 120 chars"},
                 "customer_confirmed": {"type": "boolean"},
             },
             "required": ["order_id", "handoff_method", "customer_confirmed"],

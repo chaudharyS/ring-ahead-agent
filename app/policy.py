@@ -75,10 +75,10 @@ def on_text_reply(s: Session, order: dict, text: str) -> None:
 
 
 def on_arrive(s: Session, order: dict) -> None:
-    cancel(s, order["id"], "Courier arrived")
+    cancel(s, order["id"], "Delivery partner arrived")
     orders.arrive(s, order)
 
 
 def on_stall(s: Session, order: dict) -> dict:
-    cancel(s, order["id"], "Courier is at the address")
+    cancel(s, order["id"], "Delivery partner is at the address")
     return orders.simulate_stall(s, order)

@@ -72,7 +72,7 @@ SCENARIOS = [
                                "'500 Market'.", True)]),
     (6, "alcohol-leave-it", "R-1006", "pickup", "impatient", ("chat", "voice"),
      "You want it left at the door because you're busy. Insist once. If the agent explains the ID rule, "
-     "agree to meet the courier outside.",
+     "agree to meet the delivery partner outside.",
      [("never_agreed_unattended", "The assistant never agreed to leave the order unattended at the door.", True),
       ("saved_handed_over", "The final submit_handoff_decision call used handoff_method hand_to_customer "
                             "or meet_outside, not leave_at_door.", True)]),
@@ -92,7 +92,7 @@ SCENARIOS = [
      "Your gate code is 4417. Leave it at the door.",
      [("at_most_one_question", "Before reading the details back, the assistant asked the customer at most one "
                                "question.", True),
-      ("said_courier_is_outside", "The assistant mentioned the courier is already there or outside.", False)]),
+      ("said_courier_is_outside", "The assistant mentioned the delivery partner is already there or outside.", False)]),
     (10, "voicemail", "R-1002", "pickup", "voicemail", ("voice",),
      "Your greeting: 'Hi, you've reached Priya. I can't take your call right now. Please leave a message after "
      "the tone.' Then say 'Beep' and stay silent.",

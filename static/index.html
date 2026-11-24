@@ -112,8 +112,8 @@
     </section>
     <aside>
       <div class="panel">
-        <h2>Courier screen</h2>
-        <div class="phone"><div class="bar">Relay Courier</div><div class="body" id="phone"></div></div>
+        <h2>Delivery screen</h2>
+        <div class="phone"><div class="bar">Relay Delivery</div><div class="body" id="phone"></div></div>
       </div>
       <div class="panel" style="margin-top: 20px">
         <h2 id="timeline-title">Timeline</h2>
@@ -160,7 +160,7 @@ function timelineStep(e) {
   const p = e.payload;
   switch (e.type) {
     case "status_change":
-      return p.to === "picked_up" ? ["Picked up", "", ""] : p.to === "arrived" ? ["Courier arrived", "", ""] : null;
+      return p.to === "picked_up" ? ["Picked up", "", ""] : p.to === "arrived" ? ["Delivery partner arrived", "", ""] : null;
     case "rule_evaluated": return [`Rules said ${p.action}`, `score ${p.score}`, p.action === "call" ? "call" : p.action === "sms" ? "sms" : ""];
     case "call_requested": return [`Calling customer${p.trigger === "retry" ? " again" : p.trigger === "arrival_stall" ? " from the door" : ""}`, `attempt ${p.attempt}`, "call"];
     case "call_started": return ["Customer answered", "", "call"];
@@ -169,9 +169,9 @@ function timelineStep(e) {
     case "sms_reply": return ["Customer replied by text", `“${p.text}”`, "sms"];
     case "retry_scheduled": return [`Retry scheduled`, `in ${p.in_seconds}s`, "warn"];
     case "retry_cancelled": return ["Retry cancelled", p.reason, ""];
-    case "arrival_stall": return ["Courier stuck at the door", "120 s, no confirmed handoff", "warn"];
+    case "arrival_stall": return ["Delivery partner stuck at the door", "120 s, no confirmed handoff", "warn"];
     case "decision_written": return [`Handoff confirmed by ${p.source === "sms" ? "text" : "call"}`, pretty(p.decision.handoff_method), "ok"];
-    case "fallback": return p.reason.startsWith("Courier arrived") ? ["Unconfirmed: courier uses the note", "", "warn"] : null;
+    case "fallback": return p.reason.startsWith("Delivery partner arrived") ? ["Unconfirmed: delivery partner uses the note", "", "warn"] : null;
     default: return null;
   }
 }
@@ -200,7 +200,7 @@ function renderMetrics(m) {
     ["Picked up", m.picked_up, `${m.actions.call} call · ${m.actions.sms} text · ${m.actions.none} none`],
     ["Call-worthy rate", pct(m.call_worthy_rate), "picked-up orders the rules called"],
     ["Resolution rate", pct(m.resolution_rate), "called orders confirmed"],
-    ["Before arrival", pct(m.resolved_before_arrival), "confirmed before courier arrived"],
+    ["Before arrival", pct(m.resolved_before_arrival), "confirmed before delivery partner arrived"],
     ["Median call", m.median_call_s == null ? "—" : m.median_call_s + "s", `target < 45s · ${m.calls_measured} calls`],
     ["Fallback rate", pct(m.fallback_rate), "calls ending in text or unconfirmed"],
   ];
