@@ -4,8 +4,8 @@ A voice agent built on [Vapi](https://vapi.ai) that sorts out delivery drop-off 
 
 The demo runs on "Relay", a fictional delivery platform. All data is made up.
 
-<p align="center"><img src="docs/img/hero-confirmed.png" width="300" alt="The delivery partner's screen showing Handoff confirmed, with unit, gate code and method saved by the call"></p>
-<p align="center"><sub>The delivery partner's screen after the call: details saved mid-call, before arrival.</sub></p>
+<p align="center"><img src="docs/img/hero.gif" width="300" alt="Screen recording: the delivery partner marks the order picked up, the agent calls the customer, and the Delivery screen flips to Handoff confirmed"></p>
+<p align="center"><sub>Pick up, a short call, and the delivery partner's screen flips to Handoff confirmed before they arrive.</sub></p>
 
 ## The problem
 
