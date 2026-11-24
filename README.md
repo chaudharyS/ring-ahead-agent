@@ -4,6 +4,9 @@ A voice agent built on [Vapi](https://vapi.ai) that sorts out delivery drop-off 
 
 The demo runs on "Relay", a fictional delivery platform. All data is made up.
 
+<p align="center"><img src="docs/img/hero-confirmed.png" width="300" alt="The delivery partner's screen showing Handoff confirmed, with unit, gate code and method saved by the call"></p>
+<p align="center"><sub>The delivery partner's screen after the call: details saved mid-call, before arrival.</sub></p>
+
 ## The problem
 
 Drop-off questions (which building, what's the gate code, leave it or hand it over) surface when the delivery partner arrives, at the worst possible moment. The delivery partner is driving or standing at the door, texting a customer who isn't looking at their phone.
@@ -38,6 +41,8 @@ Weights live in [`rules.yaml`](rules.yaml) and can be tuned live from the ops sc
 
 Score ≥ 3 → call, 2 → text, ≤ 1 → nothing. Overrides run first: already confirmed → nothing; customer opted out of calls → text; alcohol → always call, because an ID check needs a live handoff.
 
+![Orders table showing call, text and none decisions, each with the reasons and weights that produced it](docs/img/rules-reasons.png)
+
 ## The agent
 
 Defined in code ([`app/assistant_config.py`](app/assistant_config.py)) and synced to Vapi with one script.
@@ -56,6 +61,11 @@ Defined in code ([`app/assistant_config.py`](app/assistant_config.py)) and synce
 | Declined / voicemail / hung up undecided | Text only |
 | Confirmed | Stop everything |
 
+<img src="docs/img/order-timeline.png" width="320" align="right" alt="Per-order timeline: no answer, text sent, retry in 75 s, second call, delivery partner arrives">
+
+Every order has a timeline like this one: no answer, text sent, retry in 75 s, second call, then the delivery partner arrives.
+<br clear="right">
+
 - Max 2 calls at pickup and 3 per order, including one last call if the delivery partner is stuck at the door for 120 s.
 - A text reply cancels the pending retry. So does the delivery partner tapping **Arrive**, which marks the handoff "unconfirmed" so the delivery partner uses the existing note.
 - Both retry gaps are under 3 minutes on purpose: with **Allow Repeated Calls** on, an iPhone lets a second call from the same number through Do Not Disturb if it comes within 3 minutes ([Apple Support](https://support.apple.com/guide/iphone/set-do-not-disturb-iph5c3f5b77b/ios)).
@@ -66,6 +76,10 @@ Defined in code ([`app/assistant_config.py`](app/assistant_config.py)) and synce
 - **Vapi Simulations** ([`scripts/simulations.py`](scripts/simulations.py)): an AI tester plays the customer across 10 scenarios (cooperative, impatient, not home, self-correction, address-change request, alcohol, suspicious caller, talks over the agent, delivery partner already outside, voicemail). The agent's tool calls hit the real webhook, and results are cross-checked against the database.
   - Chat mode: **27/27** (9 scenarios × 3 runs).
   - Voice mode: **3/4**, median response time 972–1,261 ms. The failure is real and instructive: Vapi's voicemail detection didn't trigger in simulation, and the prompt had no fallback, so the agent questioned a voicemail box for 60 s.
+
+![Vapi Simulations runs: chat runs passing 27/27, one earlier chat run at 1/9 failed, and the voice run at 1/4 failed](docs/img/simulations.png)
+
+The screenshot is the full run history, failures included. The earlier chat run with 1 failed scenario was a flawed test, not the agent (the tester invented an address); the failed voice run is the voicemail case above.
 
 ## Architecture
 
